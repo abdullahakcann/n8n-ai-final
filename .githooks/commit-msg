@@ -1,0 +1,407 @@
+#!/usr/bin/env python
+import os
+import sys
+import re
+import json
+import subprocess
+import datetime
+import requests
+
+from hook_config import MISRA_ADDON_PATH, MISRA_RULE_TEXT_PATH, REPORT_WEBHOOK_URL, WEBHOOK_URL, OUTPUT_DIR, PYTHON_BIN
+from hook_utils import ask_user, run_git_cmd, parse_jira_issue_key, get_changed_lines, filter_static_output, filter_misra_lines
+from hook_utils import IS_WINDOWS
+
+if IS_WINDOWS:
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+misra_req_bypassed              = False
+user_continued_rejected_commit  = False
+llm_pipeline_failed             = False
+
+required_violations = []
+advisory_violations = []
+
+
+def report_commit(report_reasons: list, md_document: str = None):
+    """Bypass/override durumlarını ayrı bir n8n webhook'una raporlar."""
+    report_payload = {
+        "author":         AUTHOR,
+        "commit_message": COMMIT_MESSAGE,
+        "repo":           REPOSITORY,
+        "branch":         BRANCH,
+        "timestamp":      datetime.datetime.now().isoformat(),
+        "files_changed":  FILES_CHANGED,
+        "report_reasons": report_reasons,      # liste olarak gidiyor
+        "md_document":    md_document or "",
+        "jira_key":       JIRA_KEY,
+        "build_output":   BUILD_OUTPUT
+    }
+
+    try:
+        resp = requests.post(
+            REPORT_WEBHOOK_URL,
+            json=report_payload,
+            timeout=30
+        )
+        if resp.status_code == 200:
+            print("Rapor gönderildi.")
+        else:
+            print(f"Rapor gönderilemedi: HTTP {resp.status_code}")
+    except Exception as e:
+        print(f"Rapor gönderilirken hata oluştu: {e}")
+
+
+def exit_accept_commit(misra_violations, md_document=None):
+    global misra_req_bypassed
+    global user_continued_rejected_commit
+    global llm_pipeline_failed
+
+    report_reasons = []
+
+    if misra_req_bypassed:
+        required = misra_violations.get("misra_required_violations", []) if isinstance(misra_violations, dict) else []
+        advisory = misra_violations.get("misra_advisory_violations", []) if isinstance(misra_violations, dict) else []
+
+        if required:
+            report_reasons.append(f"MISRA C Required ihlali mevcut ({len(required)} adet)")
+        if advisory:
+            report_reasons.append(f"MISRA C Advisory ihlali mevcut ({len(advisory)} adet)")
+
+    if user_continued_rejected_commit:
+        report_reasons.append("AI Review sonucunda commitin iptali önerildi ancak commit yapıldı.")
+
+    if llm_pipeline_failed:
+        report_reasons.append("LLM pipeline başarısız oldu — commit AI review olmadan yapıldı.")
+
+    if report_reasons:
+        report_commit(report_reasons, md_document)
+
+    print("\n✅ Commit onaylandı.")
+    sys.exit(0)
+
+def exit_no_commit(msg = None):
+    if msg:
+        print(msg)
+    else:
+        print("Commit iptal edildi!") # generic message
+    
+    sys.exit(1) 
+
+def exit_pipeline_failed(misra_violations):
+    global llm_pipeline_failed
+
+    user_pref = ask_user("\n AI Review aşaması başarısız oldu. Review dokümanı oluşturulamadı.\n"
+             "Yine de commit'i onaylamak istiyor musun?\nBu eylem raporlanacaktır. (Y/N): ")
+    if user_pref.lower() not in ("y", "yes"):
+        exit_no_commit()
+    
+    llm_pipeline_failed = True
+    exit_accept_commit(misra_violations, md_document="")
+
+
+def run_build():
+    """
+    'make all' ile projeyi build alır.
+    Hata varsa commit iptal edilir, sadece uyarı varsa devam edilir.
+    """
+    error_lines = []
+    warning_lines = []
+    combined = ""
+
+    # Projenin kök dizinini bul
+    project_root = run_git_cmd(["git", "rev-parse", "--show-toplevel"])
+    if not project_root:
+        print("Proje kök dizini bulunamadı, build kontrolü atlanıyor.")
+        return {
+            "success": True,
+            "error_lines":   error_lines,
+            "warning_lines": warning_lines,
+            "raw_output":    combined
+            }  # bloklamadan devam et
+
+    makefile_path = os.path.join(project_root, "Makefile")
+    if not os.path.exists(makefile_path):
+        print("Makefile bulunamadı, build kontrolü atlanıyor.")
+        return {
+            "success": True,
+            "error_lines":   error_lines,
+            "warning_lines": warning_lines,
+            "raw_output":    combined
+            }  # bloklamadan devam et
+    
+    print("\nBuild kontrol ediliyor...")
+
+    result = subprocess.run(
+        ["make", "all"],
+        cwd=project_root,
+        capture_output=True,
+        text=True
+    )
+
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+
+    # make çıktısı genellikle stderr'e yazar (gcc uyarıları dahil)
+    combined = (stdout + "\n" + stderr).strip()
+
+    # Error ve warning satırlarını ayır
+    error_lines   = [l for l in combined.splitlines() if ": error:"   in l.lower()]
+    warning_lines = [l for l in combined.splitlines() if ": warning:" in l.lower()]
+
+    if error_lines:
+        print("\n" + "─" * 50)
+        print("  🔴  BUILD HATALARI")
+        print("─" * 50)
+        for line in error_lines:
+            print(f"  {line}")
+        print("─" * 50)
+        print(f"\n❌ Build {len(error_lines)} hata ile başarısız oldu — commit iptal edildi.")
+        return {
+            "success": False,
+            "error_lines":   error_lines,
+            "warning_lines": warning_lines,
+            "raw_output":    combined
+            }  # bloklamadan devam et
+    
+    if warning_lines:
+        print("\n" + "─" * 50)
+        print("  🟡  BUILD UYARILARI")
+        print("─" * 50)
+        for line in warning_lines:
+            print(f"  {line}")
+        print("─" * 50)
+        print(f"⚠️  Build {len(warning_lines)} uyarı ile tamamlandı, devam ediliyor.")
+
+    if not error_lines and not warning_lines:
+        print("✅ Build başarılı, hata veya uyarı yok.")
+
+    return {
+            "success": True,
+            "error_lines":   error_lines,
+            "warning_lines": warning_lines,
+            "raw_output":    combined
+            }  # devam et
+
+
+def run_analysis(files):
+    c_files = [f for f in files if f.endswith((".c", ".h")) and os.path.exists(f)]
+
+    if not c_files:
+        return {
+            "static_analysis": "No C/H files changed.",
+            "misra_required_violations": [],
+            "misra_advisory_violations": [],
+        }
+
+    # --- Genel statik analiz — parse edilebilir template ile ---
+    static_result = subprocess.run(
+        ["cppcheck", "--enable=all", "--error-exitcode=0",
+        "--suppress=missingIncludeSystem", "--quiet",
+        "--template={file}:{line}: {severity}: {message} [{id}]"] + c_files,
+        capture_output=True, text=True
+    )
+    static_output_raw = (static_result.stdout + static_result.stderr).strip()
+
+    # --- MISRA — dosya bazında dump → misra.py ---
+    global required_violations
+    global advisory_violations
+
+    required_violations = []
+    advisory_violations = []
+
+    for f in c_files:
+        dump_file = f + ".dump"
+
+        dump_result = subprocess.run(
+            ["cppcheck", "--dump", "--suppress=missingIncludeSystem", f],
+            capture_output=True, text=True
+        )
+
+        if not os.path.exists(dump_file):
+            print(f"⚠️  {f} için dump oluşturulamadı, MISRA kontrolü atlanıyor.")
+            continue
+
+        misra_result = subprocess.run(
+            [PYTHON_BIN, MISRA_ADDON_PATH, f"--rule-texts={MISRA_RULE_TEXT_PATH}", dump_file],
+            capture_output=True, text=True
+        )
+
+        output = (misra_result.stdout + misra_result.stderr).strip()
+
+        try:
+            os.remove(dump_file)
+        except OSError:
+            pass
+
+        for line in output.splitlines():
+            if "misra-c2012" not in line.lower():
+                continue
+            if "(advisory)" in line.lower():
+                advisory_violations.append(line)
+            else:
+                required_violations.append(line)
+
+    # --- Sadece bu committeki değişikliklerle ilgili ihlalleri filtrele ---
+    changed_lines = get_changed_lines(c_files)
+
+    filtered_static_lines = filter_static_output(static_output_raw, changed_lines)
+    filtered_required     = filter_misra_lines(required_violations, changed_lines)
+    filtered_advisory     = filter_misra_lines(advisory_violations, changed_lines)
+
+    static_output = "\n".join(filtered_static_lines) if filtered_static_lines else "No issues found in changed lines."
+
+    return {
+        "static_analysis":           static_output,
+        "misra_required_violations": filtered_required,
+        "misra_advisory_violations": filtered_advisory,
+    }
+
+
+
+############################ ENTRY POINT ############################
+
+# --- commit-msg hook: $1 = mesaj dosyasının path'i ---
+if len(sys.argv) < 2:
+    msg = "⚠️  Commit mesajı bulunamadı."
+    exit_no_commit(msg=msg)
+
+commit_msg_file = sys.argv[1]
+with open(commit_msg_file, "r", encoding="utf-8") as f:
+    COMMIT_MESSAGE = f.read().strip()
+
+JIRA_KEY = parse_jira_issue_key(COMMIT_MESSAGE)
+
+if JIRA_KEY is None:
+    msg = f"⚠️  Commit Mesajında Jira issue key bulunamadı.\n\nİlgili Jira issue key'in commit mesajınızın başında yer aldığından emin olun.\nÖrn: 'LRU-224 your-explanotary-commit-message' "
+    exit_no_commit(msg=msg)
+
+BUILD_OUTPUT = run_build()
+if BUILD_OUTPUT["success"] == False:
+    exit_no_commit()
+
+# --- Git metadata ---
+BRANCH        = run_git_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+toplevel_path = run_git_cmd(["git", "rev-parse", "--show-toplevel"])
+REPOSITORY    = os.path.basename(toplevel_path) if toplevel_path else "local-repo"
+AUTHOR        = run_git_cmd(["git", "config", "user.name"])
+
+COMMIT_DATE   = datetime.datetime.now().isoformat()
+
+files_raw     = run_git_cmd(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"])
+FILES_CHANGED = files_raw.splitlines() if files_raw else []
+DIFF = run_git_cmd(["git", "diff", "--cached"])
+
+# --- Statik analiz & MISRA ---
+print("Statik analiz ve MISRA kontrolü yapılıyor...")
+analysis = run_analysis(FILES_CHANGED)
+
+if analysis["static_analysis"] and analysis["static_analysis"] != "No issues found.":
+    print("\n" + "─" * 50)
+    print("  📋  STATİK ANALİZ SONUÇLARI")
+    print("─" * 50)
+    print(analysis["static_analysis"])
+    print("─" * 50)
+else:
+    print("✅ Statik analizde sorun bulunamadı.")
+
+if analysis["misra_advisory_violations"]:
+    print(f"⚠️  {len(analysis['misra_advisory_violations'])} Advisory MISRA ihlali tespit edildi, kontrol ediniz.")
+    for v in analysis["misra_advisory_violations"]:
+        print(f"   {v}")
+
+# Required MISRA ihlali varsa analiz aşamasında iptal et
+if analysis["misra_required_violations"]:
+    print("\n❌ MISRA C Required ihlali tespit edildi — commit iptal edildi.\n")
+    for v in analysis["misra_required_violations"]:
+        print(f"   {v}")
+    
+    user_pref = ask_user(
+        "\n MISRA C ihlallerine rağmen commiti AI Review için devam ettirmek "
+        "istiyor musun?\n Bu eylem raporlanacaktır! (Y/N): "
+    )
+
+    if user_pref.lower() not in ('y', 'yes'):
+        exit_no_commit()
+        
+    misra_req_bypassed = True
+    
+
+# --- Webhook payload ---
+payload = {
+    "author":                    AUTHOR,
+    "commit_message":            COMMIT_MESSAGE,
+    "timestamp":                 COMMIT_DATE,
+    "repo":                      REPOSITORY,
+    "branch":                    BRANCH,
+    "files_changed":             FILES_CHANGED,
+    "diff":                      DIFF,
+    "static_analysis":           analysis["static_analysis"],
+    "misra_required_violations": analysis["misra_required_violations"],
+    "misra_advisory_violations": analysis["misra_advisory_violations"],
+    "build_outputs":             BUILD_OUTPUT
+}
+
+print("Commit analizi bekleniyor...")
+
+# --- n8n webhook isteği ---
+try:
+    response = requests.post(
+        WEBHOOK_URL,
+        json=payload,
+        timeout=180          # 4 LLM paralel + hakem — 180sn yeterli olmalı
+    )
+
+    if response.status_code != 200:
+        print(f"⚠️  Webhook hata döndürdü: HTTP {response.status_code}")
+        print(f"   Detay: {response.text}")
+        exit_pipeline_failed(analysis)
+
+    try:
+        response_json = response.json()
+    except Exception:
+        print("⚠️  Webhook geçerli JSON döndürmedi.")
+        print(f"   Ham yanıt: {response.text}")
+        exit_pipeline_failed(analysis)
+
+    verdict       = response_json.get("verdict")
+    reject_reason = response_json.get("reject_reason", "")
+    document      = response_json.get("md") or response_json.get("document")
+
+    # --- Raporu kaydet ---
+    if document:
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_file = os.path.join(OUTPUT_DIR, f"doc_{ts}.md")
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(document)
+        print(f"📄 Rapor kaydedildi: {output_file}")
+    else:
+        print("⚠️  Yanıtta rapor dökümanı bulunamadı.")
+
+    # --- Verdict kontrolü ---
+    if verdict == "rejected":
+        print("\n" + "═" * 50)
+        print("  ❌  COMMIT REDDEDİLDİ")
+        print("═" * 50)
+        print(f"\n  Sebep: {reject_reason}\n")
+        if document:
+            print(f"  Detaylı rapor: {output_file}")
+        print()
+        print()
+
+        user_preference = ask_user("AI Review tarafından reddedildiği halde commiti onaylamak istiyor musun? Bu eylem raporlanacaktır! (Y/N): ")
+        if user_preference.lower() not in ("y", "yes"):
+            exit_no_commit()
+
+        user_continued_rejected_commit = True
+            
+
+    exit_accept_commit(misra_violations=analysis, md_document=document)
+
+except Exception as e:
+    print(f"⚠️  Webhook isteği başarısız: {e}")
+    exit_pipeline_failed(analysis)              # Bağlantı hatası commit'i bloklamalı
