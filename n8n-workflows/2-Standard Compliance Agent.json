@@ -1,0 +1,218 @@
+{
+  "name": "Standard Compliance Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Evaluate standards compliance for the following commit.\n\nDiff:\n{{ $json.body_diff }}\n\nStatic analysis output:\n{{ $json.body_static_analysis }}\n\nMISRA Required violations detected:\n{{ $json.body_misra_required_violations }}\n\nMISRA Advisory violations detected:\n{{ $json.body_misra_advisory_violations }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a firmware compliance engineer. Your role is to verify that code changes conform to project-specific coding standards, static analysis and MISRA C:2012 guidelines.\n\nYou will receive:\n- The git diff\n- cppcheck/static analyzer output  \n- A list of MISRA C violations already detected (Required and Advisory)\n- Project coding standards documentation (provided below)\n\nYour job:\n1. Interpret the raw MISRA violation list — explain each violation in plain language, referencing the specific MISRA C:2012 rule number and rationale\n2. Check for project-specific standard violations that static analysis may have missed (logical/architectural violations)\n3. Distinguish clearly between Required (must fix) and Advisory (should fix) violations\n4. Do NOT re-run analysis — work only with the provided outputs\n5. Focus on the violations that are in the current diff, DO NOT assume about the parts NOT IN the diff. \n\nScoring (0-100):\n- Start at 100\n- Required MISRA violation: -15 points each (max -45)\n- Advisory MISRA violation: -5 points each (max -20)  \n- Project standard violation: -10 points each (max -30)\n- Bonus up to +10 if code demonstrates exemplary standard compliance (do not add +10 point if the score exceeds \"100\", score cannot be higher than 100)\n\nDo not overkill when scoring but be fair. \n\nProject coding standards:\nNo project specific coding standards for this project! You can skip this.\n\nReturn ONLY valid JSON. No markdown, no explanation outside the JSON. Return ONLY the raw valid JSON object. "
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -3840,
+        480
+      ],
+      "id": "20df6e6a-e79b-43b1-a437-8f57db215314",
+      "name": "Standard Compliance Agent",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"score\": {\n      \"type\": \"integer\",\n      \"minimum\": 0,\n      \"maximum\": 100\n      },\n    \"misra_analysis\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"required_violations\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"object\",\n            \"properties\": {\n              \"rule\":        { \"type\": \"string\" },\n              \"location\":    { \"type\": \"string\" },\n              \"description\": { \"type\": \"string\" },\n              \"raw_finding\": { \"type\": \"string\" },\n              \"severity\":    { \"type\": \"string\", \"description\": \"Always 'required'.\" },\n              \"remediation\": { \"type\": \"string\" }\n            },\n            \"required\": [\n              \"rule\", \"location\", \"description\",\n              \"raw_finding\", \"severity\", \"remediation\"\n            ]\n          }\n        },\n        \"advisory_violations\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"object\",\n            \"properties\": {\n              \"rule\":        { \"type\": \"string\" },\n              \"location\":    { \"type\": \"string\" },\n              \"description\": { \"type\": \"string\" },\n              \"raw_finding\": { \"type\": \"string\" },\n              \"severity\":    { \"type\": \"string\", \"description\": \"Always 'advisory'.\" },\n              \"remediation\": { \"type\": \"string\" }\n            },\n            \"required\": [\n              \"rule\", \"location\", \"description\",\n              \"raw_finding\", \"severity\", \"remediation\"\n            ]\n          }\n        }\n      },\n      \"required\": [\"required_violations\", \"advisory_violations\"]\n    },\n    \"project_standard_violations\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"standard\":    { \"type\": \"string\" },\n          \"description\": { \"type\": \"string\" },\n          \"location\":    { \"type\": \"string\" },\n          \"severity\": {\n            \"type\": \"string\",\n            \"enum\": [\"required\", \"advisory\"]\n          }\n        },\n        \"required\": [\"standard\", \"description\", \"location\", \"severity\"]\n      }\n    },\n    \"summary\":      { \"type\": \"string\" },\n    \"blocks_merge\": { \"type\": \"boolean\" }\n  },\n  \"required\": [\n    \"score\",\n    \"misra_analysis\",\n    \"project_standard_violations\",\n    \"summary\",\n    \"blocks_merge\"\n  ]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -3680,
+        688
+      ],
+      "id": "1abcd61f-210e-46c6-83ba-10c390ba8081",
+      "name": "Structured Output Parser2"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"llm_role\": \"compliance\",\n  \"output\": {{ $json.output }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3456,
+        480
+      ],
+      "id": "2cb93154-4307-4dfb-a0ab-af66db121666",
+      "name": "Add LLM Role2"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -4064,
+        480
+      ],
+      "id": "fe209442-14f4-406a-a433-e9cf0503b34a",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('When Executed by Another Workflow').item.json.resumeUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"llm_role\" : {{ JSON.stringify($json.llm_role) }},\n  \"output\" : {{ JSON.stringify($json.output) }}\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -3248,
+        480
+      ],
+      "id": "9cc67c7e-b883-4ac4-ba01-85d8ad3bf7b8",
+      "name": "HTTP Request",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "openai/gpt-oss-120b",
+          "mode": "list",
+          "cachedResultName": "openai/gpt-oss-120b"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -3840,
+        688
+      ],
+      "id": "349448a1-f33f-4283-bd85-36c2d6d2a5ed",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "3Kk2KY4hIKZ5qYzt",
+          "name": "OpenAI account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "body": {
+            "author": "Yavuz Murat TAŞ",
+            "commit_message": "SCRUM-2: commit-msg hookunda ask_user fonksiyonuna windows desteği eklendi.",
+            "timestamp": "2026-07-03T16:01:50.136676",
+            "repo": "githooktest",
+            "branch": "main",
+            "files_changed": [
+              ".githooks/commit-msg"
+            ],
+            "diff": "diff --git a/.githooks/commit-msg b/.githooks/commit-msg\nindex 4702535..ad88c7b 100755\n--- a/.githooks/commit-msg\n+++ b/.githooks/commit-msg\n@@ -7,7 +7,7 @@ import subprocess\n import datetime\n \n from curl_cffi import requests\n-from hook_config import MISRA_ADDON_PATH, MISRA_RULE_TEXT_PATH, REPORT_WEBHOOK_URL, WEBHOOK_URL, OUTPUT_DIR, PYTHON_BIN\n+from hook_config import IS_WINDOWS, MISRA_ADDON_PATH, MISRA_RULE_TEXT_PATH, REPORT_WEBHOOK_URL, WEBHOOK_URL, OUTPUT_DIR, PYTHON_BIN\n \n os.makedirs(OUTPUT_DIR, exist_ok=True)\n \n@@ -100,14 +100,22 @@ def exit_pipeline_failed(misra_violations):\n     exit_accept_commit(misra_violations, md_document=\"\")\n \n def ask_user(prompt):\n-    \"\"\"Git hook'ları stdin'i terminale bağlamadığı için /dev/tty üzerinden oku.\"\"\"\n-    try:\n-        with open('/dev/tty', 'r') as tty:\n-            print(prompt, end='', flush=True)\n-            return tty.readline().strip()\n-    except (OSError, FileNotFoundError):\n-        print(\"\\n Etkileşimli terminal bulunamadı, otomatik olarak reddediliyor.\")\n-        return \"n\"\n+    \"\"\"Git hook'ları stdin'i terminale bağlamadığı için doğrudan terminal cihazından okur.\"\"\"\n+    candidates = [\"CON\"] if IS_WINDOWS else [\"/dev/tty\"]\n+    # Git Bash bazen /dev/tty'yi de destekler, fallback olarak dene\n+    if IS_WINDOWS:\n+        candidates.append(\"/dev/tty\")\n+\n+    for tty_path in candidates:\n+        try:\n+            with open(tty_path, 'r') as tty:\n+                print(prompt, end='', flush=True)\n+                return tty.readline().strip()\n+        except (OSError, FileNotFoundError):\n+            continue\n+\n+    print(\"\\nEtkileşimli terminal bulunamadı, otomatik olarak reddediliyor.\")\n+    return \"n\"\n \n def run_git_cmd(args):\n     try:",
+            "static_analysis": "No C/H files changed.",
+            "misra_required_violations": [],
+            "misra_advisory_violations": [],
+            "build_outputs": {
+              "success": true,
+              "error_lines": [],
+              "warning_lines": [],
+              "raw_output": ""
+            }
+          },
+          "resumeUrl": "http://localhost:5678/webhook-waiting/372?signature=788474627b151b57ab3851891093a34b835f556c378851044ff87879836b4380",
+          "body_misra_required_violations": [],
+          "body_misra_advisory_violations": [],
+          "body_static_analysis": "No C/H files changed.",
+          "body_diff": "diff --git a/.githooks/commit-msg b/.githooks/commit-msg\nindex 4702535..ad88c7b 100755\n--- a/.githooks/commit-msg\n+++ b/.githooks/commit-msg\n@@ -7,7 +7,7 @@ import subprocess\n import datetime\n \n from curl_cffi import requests\n-from hook_config import MISRA_ADDON_PATH, MISRA_RULE_TEXT_PATH, REPORT_WEBHOOK_URL, WEBHOOK_URL, OUTPUT_DIR, PYTHON_BIN\n+from hook_config import IS_WINDOWS, MISRA_ADDON_PATH, MISRA_RULE_TEXT_PATH, REPORT_WEBHOOK_URL, WEBHOOK_URL, OUTPUT_DIR, PYTHON_BIN\n \n os.makedirs(OUTPUT_DIR, exist_ok=True)\n \n@@ -100,14 +100,22 @@ def exit_pipeline_failed(misra_violations):\n     exit_accept_commit(misra_violations, md_document=\"\")\n \n def ask_user(prompt):\n-    \"\"\"Git hook'ları stdin'i terminale bağlamadığı için /dev/tty üzerinden oku.\"\"\"\n-    try:\n-        with open('/dev/tty', 'r') as tty:\n-            print(prompt, end='', flush=True)\n-            return tty.readline().strip()\n-    except (OSError, FileNotFoundError):\n-        print(\"\\n Etkileşimli terminal bulunamadı, otomatik olarak reddediliyor.\")\n-        return \"n\"\n+    \"\"\"Git hook'ları stdin'i terminale bağlamadığı için doğrudan terminal cihazından okur.\"\"\"\n+    candidates = [\"CON\"] if IS_WINDOWS else [\"/dev/tty\"]\n+    # Git Bash bazen /dev/tty'yi de destekler, fallback olarak dene\n+    if IS_WINDOWS:\n+        candidates.append(\"/dev/tty\")\n+\n+    for tty_path in candidates:\n+        try:\n+            with open(tty_path, 'r') as tty:\n+                print(prompt, end='', flush=True)\n+                return tty.readline().strip()\n+        except (OSError, FileNotFoundError):\n+            continue\n+\n+    print(\"\\nEtkileşimli terminal bulunamadı, otomatik olarak reddediliyor.\")\n+    return \"n\"\n \n def run_git_cmd(args):\n     try:"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Structured Output Parser2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Standard Compliance Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Standard Compliance Agent": {
+      "main": [
+        [
+          {
+            "node": "Add LLM Role2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Standard Compliance Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add LLM Role2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Standard Compliance Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8e80c0ac-9bc5-4176-bc41-43827374e701",
+  "meta": {
+    "instanceId": "3cc9a2ffbde4c15dca28560a81b0d5000b779492638426740797425e7778544a"
+  },
+  "nodeGroups": [],
+  "id": "DA7FPFhLseaNtosm",
+  "tags": []
+}

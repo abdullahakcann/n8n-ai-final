@@ -1,0 +1,812 @@
+{
+  "name": "Git Commit AI Review",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "commit-review",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "bc4e89df-df3f-4030-94f3-e2eaf7bbb098",
+      "name": "Commit Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -4400,
+        96
+      ],
+      "webhookId": "08174c3a-e731-4372-adca-4ca2910b5c24"
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"verdict\": {\n      \"type\": \"string\",\n      \"enum\": [\"approved\", \"rejected\"]\n    },\n    \"reject_reason\": { \"type\": \"string\" },\n    \"scores\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"quality\":    { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 100 },\n        \"compliance\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 100 },\n        \"security\":   { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 100 }\n      },\n      \"required\": [\"quality\", \"compliance\", \"security\"]\n    },\n    \"thresholds\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"quality\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"required\": { \"type\": \"integer\" },\n            \"passed\":   { \"type\": \"boolean\" }\n          },\n          \"required\": [\"required\", \"passed\"]\n        },\n        \"compliance\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"required\": { \"type\": \"integer\" },\n            \"passed\":   { \"type\": \"boolean\" }\n          },\n          \"required\": [\"required\", \"passed\"]\n        },\n        \"security\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"required\": { \"type\": \"integer\" },\n            \"passed\":   { \"type\": \"boolean\" }\n          },\n          \"required\": [\"required\", \"passed\"]\n        }\n      },\n      \"required\": [\"quality\", \"compliance\", \"security\"]\n    },\n    \"primary_failure\": {\n      \"type\": \"string\",\n      \"enum\": [\"quality\", \"compliance\", \"security\", \"none\"]\n    },\n    \"commit_metadata\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"author\":        { \"type\": \"string\" },\n        \"hash\":          { \"type\": \"string\" },\n        \"timestamp\":     { \"type\": \"string\" },\n        \"repo\":          { \"type\": \"string\" },\n        \"branch\":        { \"type\": \"string\" },\n        \"message\":       { \"type\": \"string\" },\n        \"files_changed\": {\n          \"type\": \"array\",\n          \"items\": { \"type\": \"string\" }\n        }\n      },\n      \"required\": [\n        \"author\", \"hash\", \"timestamp\",\n        \"repo\", \"branch\", \"message\", \"files_changed\"\n      ]\n    },\n    \"report\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"executive_summary\": { \"type\": \"string\" },\n        \"quality_section\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"score\":         { \"type\": \"integer\" },\n            \"key_findings\":  { \"type\": \"array\", \"items\": { \"type\": \"string\" } },\n            \"action_items\":  { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n          },\n          \"required\": [\"score\", \"key_findings\", \"action_items\"]\n        },\n        \"compliance_section\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"score\":         { \"type\": \"integer\" },\n            \"key_findings\":  { \"type\": \"array\", \"items\": { \"type\": \"string\" } },\n            \"action_items\":  { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n          },\n          \"required\": [\"score\", \"key_findings\", \"action_items\"]\n        },\n        \"security_section\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"score\":         { \"type\": \"integer\" },\n            \"key_findings\":  { \"type\": \"array\", \"items\": { \"type\": \"string\" } },\n            \"action_items\":  { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n          },\n          \"required\": [\"score\", \"key_findings\", \"action_items\"]\n        },\n        \"referee_notes\":        { \"type\": \"string\" },\n        \"priority_action_items\": {\n          \"type\": \"array\",\n          \"items\": { \"type\": \"string\" }\n        }\n      },\n      \"required\": [\n        \"executive_summary\",\n        \"quality_section\",\n        \"compliance_section\",\n        \"security_section\",\n        \"referee_notes\",\n        \"priority_action_items\"\n      ]\n    }\n  },\n  \"required\": [\n    \"verdict\",\n    \"reject_reason\",\n    \"scores\",\n    \"thresholds\",\n    \"primary_failure\",\n    \"commit_metadata\",\n    \"report\"\n  ]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -2688,
+        288
+      ],
+      "id": "e95124ae-bcb9-4575-b9a9-1a9ab8da43f1",
+      "name": "Structured Output Parser3"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Review the following commit and the three specialist analyses.\n\n--- COMMIT METADATA ---\nAuthor: {{ $('Commit Webhook1').item.json.body.author }}\nDate: {{ $('Commit Webhook1').item.json.body.timestamp }}\nRepo: {{ $('Commit Webhook1').item.json.body.repo }} / Branch: {{ $('Commit Webhook1').item.json.body.branch }}\nMessage: \"{{ $('Commit Webhook1').item.json.body.commit_message }}\"\nFiles changed: {{ $('Commit Webhook1').item.json.body.files_changed }}\nDiff: {{ $('Commit Webhook1').item.json.body.diff }}\n\n--- QUALITY ANALYSIS ---\n{{ JSON.stringify($json.quality_llm_output.output) }}\n\n--- COMPLIANCE ANALYSIS ---\n{{ JSON.stringify($json.compliance_llm_output.output) }}\n\n--- SECURITY ANALYSIS ---\n{{ JSON.stringify($json.security_llm_output.output) }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are the final reviewer in an automated code review pipeline for embedded systems and driver software. You receive a git commit along with three specialist analyses: code quality, standards compliance, and security.\n\nYour responsibilities:\n1. Review all three analyses critically — do not blindly trust their scores\n2. Apply threshold rules to determine if the commit should be rejected\n3. Write a single rejection reason sentence if rejected (terse, technical, actionable)\n4. Synthesize all findings into a detailed structured final report\n\nThreshold rules (apply ALL of the following — rejection if ANY fails):\n- Quality score < 60: reject\n- Compliance score < 65: reject  \n- Security score < 70: reject\n\nWhen writing the rejection reason:\n- One sentence maximum\n- Name the specific failing criterion\n- Be technical and direct — this is shown to a senior engineer in a terminal. If the problem about a specific code block, give the file and line number reference.\n\nWhen writing the full report:\n- Summarize each specialist's findings fairly\n- Give the MISRA violations with line references and the advices to fix. \n- Note any contradictions or gaps between analyses\n- Highlight the most important action items in priority order\n- Keep a professional, peer-review tone\n- Give the filenames and exact line number references for violations and vulnerabilities.\n\nReturn ONLY valid JSON. No markdown, no explanation outside the JSON."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -2848,
+        96
+      ],
+      "id": "aa3dccdd-c2f1-43f1-b6a5-c4279cebef4e",
+      "name": "Final Agent",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -3216,
+        80
+      ],
+      "id": "078f9b7d-b939-48e9-9027-9f1628516837",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Her LLM'in çıktısını node adına göre ayır\nconst quality    = items.find(i => i.json.llm_role === 'quality')?.json;\nconst compliance = items.find(i => i.json.llm_role === 'compliance')?.json;\nconst security   = items.find(i => i.json.llm_role === 'security')?.json;\n\nreturn [{\n  json: {\n    quality_llm_output:  quality,\n    compliance_llm_output:  compliance,\n    security_llm_output:  security,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3040,
+        96
+      ],
+      "id": "eb787aab-9356-4efc-b3f5-2eeeb0714923",
+      "name": "Seperate Merge By LLM"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "ZWKjS2o4QVCi13Rz",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/ZWKjS2o4QVCi13Rz",
+          "cachedResultName": "Security Agent "
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "body_static_analysis": "={{ $json.body.static_analysis }}",
+            "body_files_changed": "={{ $json.body.files_changed }}",
+            "body_branch": "={{ $json.body.branch }}",
+            "body_diff": "={{ $json.body.diff }}"
+          },
+          "matchingColumns": [
+            "body_static_analysis",
+            "body_files_changed",
+            "body_branch",
+            "body_diff"
+          ],
+          "schema": [
+            {
+              "id": "body_static_analysis",
+              "displayName": "body_static_analysis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_files_changed",
+              "displayName": "body_files_changed",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_branch",
+              "displayName": "body_branch",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_diff",
+              "displayName": "body_diff",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        -3856,
+        -80
+      ],
+      "name": "Call Security Agent ",
+      "id": "dfcfe987-823b-4fc6-9577-456ebdb5e9f9"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "0bEZRp4DvUIlobC8",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/0bEZRp4DvUIlobC8",
+          "cachedResultName": "Code Quality Agent"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "body_static_analysis": "={{ $json.body.static_analysis }}",
+            "body_commit_message": "={{ $json.body.commit_message }}",
+            "body_author": "={{ $json.body.author }}",
+            "body_branch": "={{ $json.body.branch }}",
+            "body_diff": "={{ $json.body.diff }}"
+          },
+          "matchingColumns": [
+            "body_static_analysis",
+            "body_commit_message",
+            "body_author",
+            "body_branch",
+            "body_diff"
+          ],
+          "schema": [
+            {
+              "id": "body_static_analysis",
+              "displayName": "body_static_analysis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_commit_message",
+              "displayName": "body_commit_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_author",
+              "displayName": "body_author",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_branch",
+              "displayName": "body_branch",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_diff",
+              "displayName": "body_diff",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        -3856,
+        96
+      ],
+      "name": "Call Code Quality Agent",
+      "id": "573b5b44-4cb7-4085-8358-f0e476d753d8"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "DA7FPFhLseaNtosm",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/DA7FPFhLseaNtosm",
+          "cachedResultName": "Standard Compliance Agent"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "body_misra_required_violations": "={{ $json.body.misra_required_violations }}",
+            "body_misra_advisory_violations": "={{ $json.body.misra_advisory_violations }}",
+            "body_static_analysis": "={{ $json.body.static_analysis }}",
+            "body_diff": "={{ $json.body.diff }}"
+          },
+          "matchingColumns": [
+            "body_misra_required_violations",
+            "body_misra_advisory_violations",
+            "body_static_analysis",
+            "body_diff"
+          ],
+          "schema": [
+            {
+              "id": "body_misra_required_violations",
+              "displayName": "body_misra_required_violations",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_misra_advisory_violations",
+              "displayName": "body_misra_advisory_violations",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_static_analysis",
+              "displayName": "body_static_analysis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "body_diff",
+              "displayName": "body_diff",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        -3856,
+        272
+      ],
+      "name": "Call Standard Compliance Agent",
+      "id": "f06aa2b3-885d-47cc-b4a6-49cf21e9fa33"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3648,
+        -80
+      ],
+      "id": "9f96fe9f-3f2e-4708-9e01-716a86157ee8",
+      "name": "Wait",
+      "webhookId": "38242242-c426-4aec-94d5-595a45567333"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3648,
+        96
+      ],
+      "id": "3e0c4ff7-6b1f-44d6-91db-5d7cad126607",
+      "name": "Wait1",
+      "webhookId": "38242242-c426-4aec-94d5-595a45567333"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -3648,
+        272
+      ],
+      "id": "7d8a9408-ad81-40e2-a557-207a350f61ff",
+      "name": "Wait2",
+      "webhookId": "38242242-c426-4aec-94d5-595a45567333"
+    },
+    {
+      "parameters": {
+        "content": "# AI Agent'lar paralel çalışma için Sub-Workflow olarak başlatılıyor. \n\nEğer sıralı çalışıyorlarsa \"Settings->Execution Logic->V0 (legacy)\" ayarlanmalı.\n\n\"Ctrl+Double Click\" ile agent sub-workflowları düzenlenebilir.",
+        "height": 224,
+        "width": 496
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -4064,
+        -352
+      ],
+      "id": "8683b5da-ed94-41f4-8495-3e000f94d559",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"body\" : {{ JSON.stringify($json.body) }}\n  \"resumeUrl\": {{ JSON.stringify($execution.resumeUrl) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4080,
+        -80
+      ],
+      "id": "b4a636ef-6221-4ac6-a0e2-90ef57e7b2e3",
+      "name": "Add resumeUrl"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"body\" : {{ JSON.stringify($json.body) }}\n  \"resumeUrl\": {{ JSON.stringify($execution.resumeUrl) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4080,
+        96
+      ],
+      "id": "ddcc552d-3af6-414d-a0b3-309cf221a95f",
+      "name": "Add resumeUrl 2"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"body\" : {{ JSON.stringify($json.body) }}\n  \"resumeUrl\": {{ JSON.stringify($execution.resumeUrl) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -4080,
+        272
+      ],
+      "id": "4018cc68-90be-4570-ae8c-cff7c248c0eb",
+      "name": "Add resumeUrl 3"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3456,
+        -64
+      ],
+      "id": "c448c559-63d0-4674-8831-783d1c9b71e5",
+      "name": "Extract request body"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3456,
+        96
+      ],
+      "id": "591adcfb-6c60-4a0b-8eb6-e1940da71a5d",
+      "name": "Extract request body 2"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3456,
+        256
+      ],
+      "id": "15ca92a5-218a-4994-9c15-b506e9ab0265",
+      "name": "Extract request body 3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node — Input: $json (hakem LLM output)\nconst r = $input.first().json.output\nconst report = r.report;\nconst passed = r.verdict === \"approved\";\nconst ts = new Date().toISOString().replace('T', ' ').substring(0, 19);\n\nconst scoreBar = (score, threshold) => {\n  const filled = Math.round(score / 10);\n  const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);\n  const status = score >= threshold ? '✅' : '❌';\n  return `${status} \\`${bar}\\` ${score}/100  _(threshold: ${threshold})_`;\n};\n\nconst bulletList = (items) => items.map(i => `- ${i}`).join('\\n');\n\nconst md = `# Commit Review Report\n\n${passed ? '## ✅ APPROVED' : '## ❌ REJECTED'}\n${!passed ? `\\n> **Rejection reason:** ${r.reject_reason}\\n` : ''}\n---\n\n## Commit Details\n\n| Field | Value |\n|---|---|\n| **Author** | ${r.commit_metadata.author} |\n| **Date** | ${r.commit_metadata.timestamp} |\n| **Repo / Branch** | ${r.commit_metadata.repo} / \\`${r.commit_metadata.branch}\\` |\n| **Message** | ${r.commit_metadata.message} |\n| **Files Changed** | ${r.commit_metadata.files_changed.join(', ')} |\n\n---\n\n## Scores\n\n| Category | Score | Threshold | Status |\n|---|---|---|---|\n| Code Quality | ${r.scores.quality}/100 | ${r.thresholds.quality.required} | ${r.thresholds.quality.passed ? '✅' : '❌'} |\n| Compliance | ${r.scores.compliance}/100 | ${r.thresholds.compliance.required} | ${r.thresholds.compliance.passed ? '✅' : '❌'} |\n| Security | ${r.scores.security}/100 | ${r.thresholds.security.required} | ${r.thresholds.security.passed ? '✅' : '❌'} |\n\n${scoreBar(r.scores.quality, r.thresholds.quality.required)} — Quality  \n${scoreBar(r.scores.compliance, r.thresholds.compliance.required)} — Compliance  \n${scoreBar(r.scores.security, r.thresholds.security.required)} — Security  \n\n---\n\n## Executive Summary\n\n${report.executive_summary}\n\n---\n\n## Code Quality  —  ${r.scores.quality}/100\n\n**Key findings:**\n${bulletList(report.quality_section.key_findings)}\n\n**Action items:**\n${bulletList(report.quality_section.action_items)}\n\n---\n\n## Standards Compliance  —  ${r.scores.compliance}/100\n\n**Key findings:**\n${bulletList(report.compliance_section.key_findings)}\n\n**Action items:**\n${bulletList(report.compliance_section.action_items)}\n\n---\n\n## Security Analysis  —  ${r.scores.security}/100\n\n**Key findings:**\n${bulletList(report.security_section.key_findings)}\n\n**Action items:**\n${bulletList(report.security_section.action_items)}\n\n---\n\n## Referee Notes\n\n${report.referee_notes}\n\n---\n\n## Priority Action Items\n\n${report.priority_action_items.map(i => `- ${i}`).join('\\n')}\n\n---\n\n_Generated: ${ts}_\n`;\n\nreturn { md, verdict: r.verdict};"
+      },
+      "id": "a2ff2cbf-bebd-45cc-bb6b-f32db34cea99",
+      "name": "Build Review Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2528,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"md\" : {{ JSON.stringify($json.md) }},\n  \"verdict\" : {{ JSON.stringify($json.verdict) }},\n  \"reject_reason\" : {{ JSON.stringify($('Final Agent').item.json.output.reject_reason) }}\n}",
+        "options": {}
+      },
+      "id": "6f386bd3-74dd-4479-aafc-ac75b147245f",
+      "name": "Return Review",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -2320,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "openai/gpt-oss-120b",
+          "mode": "list",
+          "cachedResultName": "openai/gpt-oss-120b"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -2864,
+        288
+      ],
+      "id": "d52f585b-b2fd-4ce0-9c22-acf473d54c12",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "3Kk2KY4hIKZ5qYzt",
+          "name": "OpenAI account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Commit Webhook1": [
+      {
+        "json": {
+          "headers": {
+            "host": "localhost:5678",
+            "user-agent": "python-requests/2.32.4",
+            "accept-encoding": "gzip, deflate",
+            "accept": "*/*",
+            "connection": "keep-alive",
+            "content-length": "10322",
+            "content-type": "application/json"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "author": "Yavuz Murat TAŞ",
+            "commit_message": "LRU-659 ornekasdasdasd",
+            "timestamp": "2026-07-14T15:57:26.489598",
+            "repo": "githooktest",
+            "branch": "main",
+            "files_changed": [
+              ".githooks/commit-msg"
+            ],
+            "diff": "diff --git a/.githooks/commit-msg b/.githooks/commit-msg\nindex af1d02b..660e30f 100755\n--- a/.githooks/commit-msg\n+++ b/.githooks/commit-msg\n@@ -5,14 +5,17 @@ import re\n import json\n import subprocess\n import datetime\n+import requests\n \n-if sys.platform == \"win32\":\n+from hook_config import MISRA_ADDON_PATH, MISRA_RULE_TEXT_PATH, REPORT_WEBHOOK_URL, WEBHOOK_URL, OUTPUT_DIR, PYTHON_BIN\n+from hook_utils import ask_user, run_git_cmd, parse_jira_issue_key, get_changed_lines, filter_static_output, filter_misra_lines\n+from hook_utils import IS_WINDOWS\n+\n+if IS_WINDOWS:\n     import io\n     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding=\"utf-8\", errors=\"replace\")\n     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding=\"utf-8\", errors=\"replace\")\n \n-from curl_cffi import requests\n-from hook_config import IS_WINDOWS, MISRA_ADDON_PATH, MISRA_RULE_TEXT_PATH, REPORT_WEBHOOK_URL, WEBHOOK_URL, OUTPUT_DIR, PYTHON_BIN\n \n os.makedirs(OUTPUT_DIR, exist_ok=True)\n \n@@ -23,10 +26,6 @@ llm_pipeline_failed             = False\n required_violations = []\n advisory_violations = []\n \n-def parse_jira_issue_key(commit_msg: str = None):\n-    _jira_match  = re.match(r'^([A-Z]+-\\d+)', commit_msg)\n-    jira_key     = _jira_match.group(1) if _jira_match else None\n-    return jira_key\n \n def report_commit(report_reasons: list, md_document: str = None):\n     \"\"\"Bypass/override durumlarını ayrı bir n8n webhook'una raporlar.\"\"\"\n@@ -104,29 +103,6 @@ def exit_pipeline_failed(misra_violations):\n     llm_pipeline_failed = True\n     exit_accept_commit(misra_violations, md_document=\"\")\n \n-def ask_user(prompt):\n-    \"\"\"Git hook'ları stdin'i terminale bağlamadığı için doğrudan terminal cihazından okur.\"\"\"\n-    candidates = [\"CON\"] if IS_WINDOWS else [\"/dev/tty\"]\n-    # Git Bash bazen /dev/tty'yi de destekler, fallback olarak dene\n-    if IS_WINDOWS:\n-        candidates.append(\"/dev/tty\")\n-\n-    for tty_path in candidates:\n-        try:\n-            with open(tty_path, 'r') as tty:\n-                print(prompt, end='', flush=True)\n-                return tty.readline().strip()\n-        except (OSError, FileNotFoundError):\n-            continue\n-\n-    print(\"\\nEtkileşimli terminal bulunamadı, otomatik olarak reddediliyor.\")\n-    return \"n\"\n-\n-def run_git_cmd(args):\n-    try:\n-        return subprocess.check_output(args, stderr=subprocess.DEVNULL).decode(\"utf-8\").strip()\n-    except subprocess.CalledProcessError:\n-        return \"\"\n \n def run_build():\n     \"\"\"\n@@ -211,164 +187,6 @@ def run_build():\n             \"raw_output\":    combined\n             }  # devam et\n \n-FUNC_SIGNATURE_RE = re.compile(\n-    r'^[A-Za-z_][\\w\\s\\*]*\\b\\w+\\s*\\([^;{}]*\\)\\s*$'\n-)\n-\n-\n-def find_function_ranges(filepath):\n-    \"\"\"\n-    Dosyadaki fonksiyon gövdelerinin (başlangıç, bitiş) satır numaralarını bulur.\n-    Brace-depth takibi + fonksiyon imzası sezgisiyle çalışır.\n-    Struct/union/enum gibi top-level blokları fonksiyon sanmamak için\n-    açılan '{' öncesindeki metnin fonksiyon imzasına benzeyip benzemediğine bakılır.\n-    \"\"\"\n-    try:\n-        with open(filepath, \"r\", encoding=\"utf-8\", errors=\"replace\") as f:\n-            lines = f.readlines()\n-    except OSError:\n-        return []\n-\n-    ranges = []\n-    depth = 0\n-    pending_sig_lines = []\n-    func_start_line = None\n-\n-    for idx, line in enumerate(lines, start=1):\n-        open_count  = line.count(\"{\")\n-        close_count = line.count(\"}\")\n-\n-        if depth == 0 and open_count > 0:\n-            pending_sig_lines.append(line)\n-            signature_text  = \" \".join(s.strip() for s in pending_sig_lines)\n-            sig_before_brace = signature_text.split(\"{\", 1)[0].strip()\n-\n-            is_function_sig = bool(FUNC_SIGNATURE_RE.match(sig_before_brace)) and \"(\" in sig_before_brace\n-\n-            if is_function_sig:\n-                func_start_line = idx if func_start_line is None else func_start_line\n-            pending_sig_lines = []\n-\n-        elif depth == 0 and open_count == 0 and close_count == 0:\n-            stripped = line.strip()\n-            if stripped and not stripped.startswith((\"//\", \"/*\", \"*\")):\n-                pending_sig_lines.append(line)\n-                if len(pending_sig_lines) > 10:\n-                    pending_sig_lines = pending_sig_lines[-10:]\n-\n-        elif depth == 0:\n-            pending_sig_lines = []\n-\n-        depth += open_count - close_count\n-\n-        if depth == 0 and func_start_line is not None and close_count > 0:\n-            ranges.append((func_start_line, idx))\n-            func_start_line = None\n-\n-    return ranges\n-\n-\n-def expand_lines_to_functions(filepath, line_numbers):\n-    \"\"\"\n-    Verilen satır numaralarını, bulundukları fonksiyonun tüm satır aralığına genişletir.\n-    Fonksiyon dışı (global scope) satırlar olduğu gibi kalır.\n-    \"\"\"\n-    if not line_numbers:\n-        return set()\n-\n-    ranges = find_function_ranges(filepath)\n-    expanded = set()\n-\n-    for ln in line_numbers:\n-        matched = False\n-        for start, end in ranges:\n-            if start <= ln <= end:\n-                expanded.update(range(start, end + 1))\n-                matched = True\n-                break\n-        if not matched:\n-            expanded.add(ln)\n-\n-    return expanded\n-\n-def get_changed_lines(files):\n-    \"\"\"\n-    'git diff --cached -U0' çıktısından değişen satırları bulur,\n-    sonra her satırı bulunduğu fonksiyonun tüm aralığına genişletir.\n-    \"\"\"\n-    changed_lines = {}\n-\n-    diff_output = run_git_cmd([\"git\", \"diff\", \"--cached\", \"-U0\", \"--\"] + files)\n-    if not diff_output:\n-        return changed_lines\n-\n-    current_file = None\n-    for line in diff_output.splitlines():\n-        if line.startswith(\"+++ \"):\n-            path = line[4:].strip()\n-            if path == \"/dev/null\":\n-                current_file = None\n-            else:\n-                current_file = path.split(\"/\", 1)[1] if path.startswith((\"a/\", \"b/\")) else path\n-                changed_lines.setdefault(current_file, set())\n-            continue\n-\n-        if line.startswith(\"@@\") and current_file is not None:\n-            match = re.search(r'\\+(\\d+)(?:,(\\d+))?', line)\n-            if match:\n-                start_line = int(match.group(1))\n-                line_count = int(match.group(2)) if match.group(2) is not None else 1\n-                for ln in range(start_line, start_line + line_count):\n-                    changed_lines[current_file].add(ln)\n-\n-    # ── Değişen satırları fonksiyon sınırlarına genişlet ──────────────────────\n-    expanded_changed_lines = {}\n-    for filename, lines in changed_lines.items():\n-        if os.path.exists(filename):\n-            expanded_changed_lines[filename] = expand_lines_to_functions(filename, lines)\n-        else:\n-            expanded_changed_lines[filename] = lines\n-\n-    return expanded_changed_lines\n-\n-\n-def _normalize_path(p):\n-    return os.path.normpath(p).replace(\"\\\\\", \"/\")\n-\n-\n-def _is_line_relevant(filename, lineno, changed_lines):\n-    filename_norm = _normalize_path(filename)\n-    for f, lines in changed_lines.items():\n-        if _normalize_path(f) == filename_norm:\n-            return lineno in lines\n-    return False\n-\n-STATIC_LINE_RE = re.compile(r'^(?P<file>[^:]+):(?P<line>\\d+): (?P<severity>\\w+): (?P<message>.+)$')\n-MISRA_LINE_RE  = re.compile(r'^\\[(?P<file>.+?):(?P<line>\\d+)\\]')\n-\n-\n-def filter_static_output(raw_output, changed_lines):\n-    \"\"\"Sadece değişen satırlarla ilgili statik analiz satırlarını tutar.\"\"\"\n-    relevant = []\n-    for line in raw_output.splitlines():\n-        m = STATIC_LINE_RE.match(line)\n-        if not m:\n-            continue  # 'Active checkers' gibi özet satırları atla\n-        if _is_line_relevant(m.group(\"file\"), int(m.group(\"line\")), changed_lines):\n-            relevant.append(line)\n-    return relevant\n-\n-\n-def filter_misra_lines(lines_list, changed_lines):\n-    \"\"\"Sadece değişen satırlarla ilgili MISRA ihlallerini tutar.\"\"\"\n-    relevant = []\n-    for line in lines_list:\n-        m = MISRA_LINE_RE.match(line)\n-        if not m:\n-            continue\n-        if _is_line_relevant(m.group(\"file\"), int(m.group(\"line\")), changed_lines):\n-            relevant.append(line)\n-    return relevant\n \n def run_analysis(files):\n     c_files = [f for f in files if f.endswith((\".c\", \".h\")) and os.path.exists(f)]\n@@ -444,6 +262,9 @@ def run_analysis(files):\n     }\n \n \n+\n+############################ ENTRY POINT ############################\n+\n # --- commit-msg hook: $1 = mesaj dosyasının path'i ---\n if len(sys.argv) < 2:\n     msg = \"⚠️  Commit mesajı bulunamadı.\"\n@@ -532,9 +353,7 @@ try:\n     response = requests.post(\n         WEBHOOK_URL,\n         json=payload,\n-        # verify=False,\n-        # impersonate=\"chrome120\",\n-        timeout=180          # 4 LLM paralel + hakem — 120sn yeterli olmalı\n+        timeout=180          # 4 LLM paralel + hakem — 180sn yeterli olmalı\n     )\n \n     if response.status_code != 200:",
+            "static_analysis": "No C/H files changed.",
+            "misra_required_violations": [],
+            "misra_advisory_violations": [],
+            "build_outputs": {
+              "success": true,
+              "error_lines": [],
+              "warning_lines": [],
+              "raw_output": ""
+            }
+          },
+          "webhookUrl": "http://localhost:5678/webhook/commit-review",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Commit Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Add resumeUrl",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Add resumeUrl 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Add resumeUrl 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser3": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Final Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Seperate Merge By LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Agent": {
+      "main": [
+        [
+          {
+            "node": "Build Review Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seperate Merge By LLM": {
+      "main": [
+        [
+          {
+            "node": "Final Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Security Agent ": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Code Quality Agent": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Standard Compliance Agent": {
+      "main": [
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Extract request body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Extract request body 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Extract request body 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add resumeUrl": {
+      "main": [
+        [
+          {
+            "node": "Call Security Agent ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add resumeUrl 2": {
+      "main": [
+        [
+          {
+            "node": "Call Code Quality Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add resumeUrl 3": {
+      "main": [
+        [
+          {
+            "node": "Call Standard Compliance Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract request body": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract request body 2": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extract request body 3": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Build Review Document": {
+      "main": [
+        [
+          {
+            "node": "Return Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Final Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v0",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "d8ffc9d9-18cf-4130-9f88-283f42f338de",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3cc9a2ffbde4c15dca28560a81b0d5000b779492638426740797425e7778544a"
+  },
+  "nodeGroups": [],
+  "id": "rthjK6mrJo7wH9ut",
+  "tags": []
+}
