@@ -1,0 +1,280 @@
+{
+  "name": "bypass-report-no-pandoc",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Gelen raporu jiraya/email yollayacak olan pipeline\n"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -704,
+        304
+      ],
+      "id": "133551ca-2521-456e-b9e0-83a6d1793cde",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bypass-report",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -688,
+        672
+      ],
+      "id": "cc73a067-a13e-4a1b-b306-f9f49c3ce644",
+      "name": "Webhook1",
+      "webhookId": "fc96d46b-56ef-44e1-ad9b-d5d307299f2e"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\n\nconst md = $input.first().json.body.md_document || \"\";\n\nif (!md) {\n  throw new Error(\"MD içeriği bulunamadı.\");\n}\n\nconst ts       = new Date().toISOString().replace(/[:.]/g, \"-\").slice(0, 19);\nconst base     = `review_${ts}`;\nconst mdPath   = `/tmp/${base}.md`;\nconst docxPath = `/tmp/${base}.docx`;\n\nfs.writeFileSync(mdPath, md, \"utf-8\");\n\nreturn [{\n  json: {\n    ...$input.first().json.body,\n    md_filepath:   mdPath,\n    docx_filepath: docxPath,\n    filename_base: base,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        672
+      ],
+      "id": "154ddddf-84f4-4a9f-9572-fbc559d019ca",
+      "name": "Write .md to a file1",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\n\nconst mdPath       = $('Write .md to a file1').first().json.md_filepath;\nconst filenameBase = $('Write .md to a file1').first().json.filename_base;\n\nif (!fs.existsSync(mdPath)) {\n  throw new Error(`MD dosyası bulunamadı: ${mdPath}`);\n}\n\n// MD dosyasını oku ve binary'e çevir\nconst buffer = fs.readFileSync(mdPath);\n\nconst binaryData = await this.helpers.prepareBinaryData(\n  buffer,\n  `${filenameBase}.md`,\n  \"text/markdown\"\n);\n\n// Temizlik\ntry { fs.unlinkSync(mdPath); } catch {}\n\nreturn [{\n  json: {\"filename_base\": $input.first().json.filename_base},\n  binary: { attachment: binaryData }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        560
+      ],
+      "id": "35563ecd-4857-47a0-826e-9b8778900e26",
+      "name": "Convert .md to binary (attachment)1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Webhook1').first().json.body;\n\nconst author        = data.author        || \"Bilinmiyor\";\nconst commitMessage = data.commit_message || \"—\";\nconst repo          = data.repo           || \"—\";\nconst branch        = data.branch         || \"—\";\nconst timestamp     = data.timestamp      || \"—\";\nconst filesChanged  = Array.isArray(data.files_changed) ? data.files_changed : [];\nconst reasons       = Array.isArray(data.report_reasons) ? data.report_reasons : [];\nconst hasDocument   = Boolean(data.md_document && data.md_document.trim().length > 0);\nconst doc_filename  = $input.first().json.filename_base;\n\n// ── Jira base URL (ayrı node'dan) ───────────────────────────────────────────\nconst jiraBaseUrl = $('Set  Config').first().json.jiraBaseUrl;\n\n// ── Attachment binary'sini bir sonraki node'lara taşı ──────────────────────\n// (Attachment sadece md_document doluysa \"Convert .md to binary\" node'undan gelir.\n//  Boşsa error path'ten geliriz ve binary yoktur; bu durumda mail attachment'sız gider.)\nconst inputBinary = $input.first().binary || {};\n\n// ── Jira issue key ────────────────────────────────────────────────────────────\nconst jiraMatch   = commitMessage.match(/^([A-Z]+-\\d+)/);\nconst jiraKey     = jiraMatch ? jiraMatch[1] : null;\nconst jiraKeyHtml = jiraKey\n  ? `<a href=\"${jiraBaseUrl}/browse/${jiraKey}\"\n       style=\"color:#1A6FA8;text-decoration:none;font-weight:600;\">${jiraKey}</a>`\n  : `<span style=\"color:#95A5A6;font-style:italic;\">bulunamadı</span>`;\n\n// ── Formatlı tarih ────────────────────────────────────────────────────────────\nconst formattedDate = (() => {\n  try {\n    return new Date(timestamp).toLocaleString(\"tr-TR\", {\n      year: \"numeric\", month: \"long\", day: \"numeric\",\n      hour: \"2-digit\", minute: \"2-digit\", timeZone: \"Europe/Istanbul\"\n    });\n  } catch { return timestamp; }\n})();\n\n// ── Sebep satırları ───────────────────────────────────────────────────────────\nconst reasonRows = reasons.map((r, i) => `\n  <tr>\n    <td style=\"padding:10px 16px;border-bottom:1px solid #F0F0F0;\n      vertical-align:top;width:28px;\">\n      <span style=\"display:inline-block;background:#1A6FA8;color:#fff;\n        border-radius:50%;width:22px;height:22px;line-height:22px;\n        text-align:center;font-size:12px;font-weight:bold;\">${i + 1}</span>\n    </td>\n    <td style=\"padding:10px 16px;border-bottom:1px solid #F0F0F0;\n      font-size:14px;color:#2C3E50;line-height:1.5;\">${r}</td>\n  </tr>`).join(\"\");\n\n// ── Değişen dosyalar ─────────────────────────────────────────────────────────\nconst fileList = filesChanged.length > 0\n  ? filesChanged.map(f =>\n      `<li style=\"font-family:monospace;font-size:13px;color:#34495E;padding:2px 0;\">${f}</li>`\n    ).join(\"\")\n  : `<li style=\"font-size:13px;color:#95A5A6;\">Dosya bilgisi bulunamadı</li>`;\n\n// ── Attachment notu ───────────────────────────────────────────────────────────\nconst attachmentNote = hasDocument\n  ? `<tr>\n      <td style=\"padding:20px 32px;\">\n        <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n          <td style=\"background:#EBF5FB;border:1px solid #AED6F1;\n            border-radius:6px;padding:14px 18px;\">\n            <p style=\"margin:0;font-size:13px;color:#1A5276;line-height:1.6;\">\n              📎 Detaylı AI review analizi için mail ekindeki\n              <strong><em>${doc_filename}.md </em></strong>\n              dosyasına bakabilirsiniz.<br>\n              <span style=\"color:#2E86C1;\">Rapor; kod kalitesi, MISRA uyumluluk\n              ve güvenlik analizlerini içermektedir.</span>\n            </p>\n          </td>\n        </tr></table>\n      </td>\n    </tr>`\n  : `<tr>\n      <td style=\"padding:20px 32px;\">\n        <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n          <td style=\"background:#FDFEFE;border:1px solid #D5D8DC;\n            border-radius:6px;padding:14px 18px;\">\n            <p style=\"margin:0;font-size:13px;color:#717D7E;line-height:1.6;\">\n              ⚠️ Bu commit için AI review raporu (.md dokümanı) oluşturulamadı,\n              bu nedenle mail ekinde herhangi bir dosya bulunmamaktadır.\n              Pipeline detaylı analiz üretemeden bypass edilmiştir.\n            </p>\n          </td>\n        </tr></table>\n      </td>\n    </tr>`;\n\n// ── HTML ──────────────────────────────────────────────────────────────────────\nconst html = `<!DOCTYPE html>\n<html lang=\"tr\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n  <title>Commit Raporu</title>\n</head>\n<body style=\"margin:0;padding:0;background:#F4F6F8;\n  font-family:Arial,Helvetica,sans-serif;\">\n\n<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"\n  style=\"background:#F4F6F8;padding:32px 0;\">\n  <tr><td align=\"center\">\n    <table width=\"620\" cellpadding=\"0\" cellspacing=\"0\"\n      style=\"background:#FFFFFF;border-radius:8px;\n        box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;\">\n\n      <!-- Header -->\n      <tr>\n        <td style=\"background:#16213E;padding:24px 32px;\">\n          <p style=\"margin:0;font-size:11px;color:rgba(255,255,255,0.6);\n            letter-spacing:1.5px;text-transform:uppercase;\">\n            Git Review Pipeline\n          </p>\n          <h1 style=\"margin:10px 0 0;font-size:20px;color:#FFFFFF;font-weight:700;\">\n            Commit Review Raporu\n          </h1>\n          ${jiraKey ? `\n          <p style=\"margin:8px 0 0;font-size:13px;color:rgba(255,255,255,0.75);\">\n            Jira:\n            <a href=\"${jiraBaseUrl}/browse/${jiraKey}\"\n              style=\"color:#7EC8E3;text-decoration:none;font-weight:600;\">\n              ${jiraKey}\n            </a>\n          </p>` : \"\"}\n        </td>\n      </tr>\n\n      <!-- Commit Metadata -->\n      <tr>\n        <td style=\"padding:24px 32px 0;\">\n          <h2 style=\"margin:0 0 14px;font-size:12px;color:#7F8C8D;\n            text-transform:uppercase;letter-spacing:1px;font-weight:600;\">\n            Commit Bilgileri\n          </h2>\n          <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"\n            style=\"border:1px solid #E8E8E8;border-radius:6px;overflow:hidden;\">\n            <tr style=\"background:#F8F9FA;\">\n              <td style=\"padding:10px 16px;font-size:12px;color:#7F8C8D;\n                font-weight:600;width:130px;border-bottom:1px solid #E8E8E8;\">\n                AUTHOR\n              </td>\n              <td style=\"padding:10px 16px;font-size:14px;color:#2C3E50;\n                border-bottom:1px solid #E8E8E8;\">\n                ${author}\n              </td>\n            </tr>\n            <tr>\n              <td style=\"padding:10px 16px;font-size:12px;color:#7F8C8D;\n                font-weight:600;border-bottom:1px solid #E8E8E8;\">\n                JIRA ISSUE\n              </td>\n              <td style=\"padding:10px 16px;font-size:14px;\n                border-bottom:1px solid #E8E8E8;\">\n                ${jiraKeyHtml}\n              </td>\n            </tr>\n            <tr style=\"background:#F8F9FA;\">\n              <td style=\"padding:10px 16px;font-size:12px;color:#7F8C8D;\n                font-weight:600;border-bottom:1px solid #E8E8E8;\">\n                REPO / BRANCH\n              </td>\n              <td style=\"padding:10px 16px;font-size:14px;color:#2C3E50;\n                border-bottom:1px solid #E8E8E8;\">\n                <code style=\"background:#F0F3F4;padding:2px 6px;\n                  border-radius:3px;font-size:13px;\">${repo}</code>\n                &nbsp;/&nbsp;\n                <code style=\"background:#F0F3F4;padding:2px 6px;\n                  border-radius:3px;font-size:13px;\">${branch}</code>\n              </td>\n            </tr>\n            <tr>\n              <td style=\"padding:10px 16px;font-size:12px;color:#7F8C8D;\n                font-weight:600;border-bottom:1px solid #E8E8E8;\">\n                TARİH\n              </td>\n              <td style=\"padding:10px 16px;font-size:14px;color:#2C3E50;\n                border-bottom:1px solid #E8E8E8;\">\n                ${formattedDate}\n              </td>\n            </tr>\n            <tr style=\"background:#F8F9FA;\">\n              <td style=\"padding:10px 16px;font-size:12px;color:#7F8C8D;\n                font-weight:600;border-bottom:1px solid #E8E8E8;\">\n                COMMIT MESAJI\n              </td>\n              <td style=\"padding:10px 16px;border-bottom:1px solid #E8E8E8;\">\n                <code style=\"background:#F0F3F4;padding:4px 8px;border-radius:3px;\n                  font-size:13px;color:#2C3E50;display:inline-block;\n                  line-height:1.5;\">${commitMessage}</code>\n              </td>\n            </tr>\n            <tr>\n              <td style=\"padding:10px 16px;font-size:12px;color:#7F8C8D;\n                font-weight:600;vertical-align:top;\">\n                DEĞİŞEN DOSYALAR\n              </td>\n              <td style=\"padding:10px 16px;\">\n                <ul style=\"margin:0;padding-left:18px;\">${fileList}</ul>\n              </td>\n            </tr>\n          </table>\n        </td>\n      </tr>\n\n      <!-- Rapor Sebepleri -->\n      <tr>\n        <td style=\"padding:24px 32px 0;\">\n          <h2 style=\"margin:0 0 14px;font-size:12px;color:#7F8C8D;\n            text-transform:uppercase;letter-spacing:1px;font-weight:600;\">\n            Raporlanma Nedeni\n          </h2>\n          <table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"\n            style=\"border:1px solid #E8E8E8;border-radius:6px;overflow:hidden;\">\n            ${reasonRows}\n          </table>\n        </td>\n      </tr>\n\n      <!-- Attachment notu -->\n      ${attachmentNote}\n\n      <!-- Footer -->\n      <tr>\n        <td style=\"background:#F8F9FA;border-top:1px solid #E8E8E8;\n          padding:16px 32px;\">\n          <p style=\"margin:0;font-size:12px;color:#95A5A6;line-height:1.6;\">\n            Bu e-posta Cihaz Yazılımları AI Review Pipeline tarafından otomatik\n            olarak oluşturulmuştur.<br>\n            Sorularınız için sistem yöneticinizle iletişime geçin.\n          </p>\n        </td>\n      </tr>\n\n    </table>\n  </td></tr>\n</table>\n\n</body>\n</html>`;\n\n// ── Mail subject ──────────────────────────────────────────────────────────────\nconst subject = jiraKey\n  ? `[AI-Review] ${jiraKey} için commit raporu`\n  : `[AI-Review] ${repo}@${branch} — ${author} commit raporu`;\n\nreturn [{\n  json: {\n    jira_key:      jiraKey,\n    email_html:    html,\n    email_subject: subject,\n    hasAttachment: hasDocument,\n  },\n  binary: inputBinary,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        688
+      ],
+      "id": "c10d497f-bd8f-459c-8029-f139ab759a8e",
+      "name": "Create the Email HTML1"
+    },
+    {
+      "parameters": {
+        "jiraVersion": "serverPat",
+        "operation": "get",
+        "issueKey": "={{ $json.jira_key }}",
+        "additionalFields": {
+          "expand": "names"
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        368,
+        688
+      ],
+      "id": "93b4e8c1-cffe-4861-b2e3-8ac975f0a240",
+      "name": "Fetch the Jira Issue1",
+      "credentials": {
+        "jiraSoftwareServerPatApi": {
+          "id": "CNK0WXR8jXpVCCT4",
+          "name": "Jira SW Server (PAT) account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Jira node'undan gelen veriyi alıyoruz\nconst issue = $input.first().json;\n\n// 1. \"names\" kontrolü\nif (!issue.names) {\n  throw new Error(\"Lütfen Jira node'unda 'Expand' seçeneğine 'names' eklediğinizden emin olun.\");\n}\n\n// 2. Reviewer alanının ID'sini dinamik buluyoruz\nlet reviewerFieldKey = null;\nfor (const [key, name] of Object.entries(issue.names)) {\n  if (name.toLowerCase().includes(\"reviewer\")) {\n    reviewerFieldKey = key;\n    break;\n  }\n}\n\nif (!reviewerFieldKey) {\n  throw new Error(\"Jira'da 'Reviewer' isimli bir alan bulunamadı.\");\n}\n\n// 3. YARDIMCI FONKSİYON: Gelen veri tekil kişi mi yoksa çoklu kişi (Array) mi otomatik çözer\nfunction extractEmails(fieldData) {\n  if (!fieldData) return []; // Veri yoksa boş dizi dön\n  \n  if (Array.isArray(fieldData)) {\n    // Çoklu seçim yapılmışsa map ile e-postaları topla ve boş olanları ele\n    return fieldData.map(user => user.emailAddress).filter(email => email);\n  } else if (fieldData.emailAddress) {\n    // Tek bir kullanıcıysa dizi içinde dön\n    return [fieldData.emailAddress];\n  }\n  \n  return [];\n}\n\n// 4. Mailleri yardımcı fonksiyonla temiz bir şekilde çekiyoruz\nconst reporterEmails = extractEmails(issue.fields.reporter);\nconst assigneeEmails = extractEmails(issue.fields.assignee);\nconst reviewerEmails = extractEmails(issue.fields[reviewerFieldKey]);\n\n// 5. Bütün çekilen e-postaları tek bir dizide birleştiriyoruz\nconst allEmails = [...reporterEmails, ...assigneeEmails, ...reviewerEmails];\n\n// 6. Aynı kişi birden fazla rolde ise (Örn: Assignee aynı zamanda Reviewer ise) tekrarları siliyoruz\nconst uniqueEmails = [...new Set(allEmails)];\n\n// 7. Attachment binary'sini \"Create the Email HTML\" node'undan doğrudan çekiyoruz.\n//    Ara node'lar (Jira node dahil) binary'i garanti taşımayabildiği için,\n//    isim referansıyla kaynaktan tekrar alıyoruz.\nconst attachmentBinary = $('Create the Email HTML1').first().binary || {};\n\n// Sonucu Email node'u için string'e çevirip döndürüyoruz\nreturn [{\n  json: {\n    issueKey: issue.key,\n    issueSummary: issue.fields.summary,\n    reviewerFieldKeyFound: reviewerFieldKey,\n    toEmails: uniqueEmails.join(', '), // Virgülle ayrılmış formata çevirir\n    hasAttachment: $('Create the Email HTML1').first().json.hasAttachment,\n  },\n  binary: attachmentBinary,\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        688
+      ],
+      "id": "1f8b427f-99c0-4a45-9d72-c0d89addaf20",
+      "name": "Extract Emails of \"Reporter, Assignee, Reviewer\"1"
+    },
+    {
+      "parameters": {
+        "fromEmail": "=\"{{ $('Webhook1').item.json.body.author }}\" <{{ $('Fetch the Jira Issue1').item.json.fields.assignee.emailAddress }}>",
+        "toEmail": "={{ $json.toEmails }}",
+        "subject": "={{ $('Create the Email HTML1').item.json.email_subject }}",
+        "html": "={{ $('Create the Email HTML1').item.json.email_html }}",
+        "options": {
+          "fileAttachments": "={{ $json.hasAttachment ? \"attachment\" : \"\" }}",
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        784,
+        688
+      ],
+      "id": "f2e6af55-cbb1-49e3-a56d-8dd1c0e16379",
+      "name": "Send the Report Email1",
+      "webhookId": "cf35f31e-5e4a-4f07-b490-f3b98d432e2b",
+      "credentials": {
+        "smtp": {
+          "id": "9mOd5aGBgS9zB6to",
+          "name": "SMTP account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "57ab46e3-263a-4d1b-9bfe-26e1d9f91c64",
+              "name": "jiraBaseUrl",
+              "value": "https://argejira01.arge2004.com.tr:8443/",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -512,
+        512
+      ],
+      "id": "4d3e413d-c5a6-4709-99de-34fd093feb66",
+      "name": "Set  Config"
+    },
+    {
+      "parameters": {
+        "amount": 0.5
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -512,
+        672
+      ],
+      "id": "02c7b1e9-45bd-49db-9716-4262e0ab9f65",
+      "name": "Wait",
+      "webhookId": "37bf2bd8-73a0-4e2a-a87a-b2d701b23818"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Set  Config",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write .md to a file1": {
+      "main": [
+        [
+          {
+            "node": "Convert .md to binary (attachment)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create the Email HTML1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert .md to binary (attachment)1": {
+      "main": [
+        [
+          {
+            "node": "Create the Email HTML1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create the Email HTML1": {
+      "main": [
+        [
+          {
+            "node": "Fetch the Jira Issue1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch the Jira Issue1": {
+      "main": [
+        [
+          {
+            "node": "Extract Emails of \"Reporter, Assignee, Reviewer\"1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Emails of \"Reporter, Assignee, Reviewer\"1": {
+      "main": [
+        [
+          {
+            "node": "Send the Report Email1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Write .md to a file1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "a0301454-f7de-4db9-a478-90e224822732",
+  "meta": {
+    "instanceId": "3cc9a2ffbde4c15dca28560a81b0d5000b779492638426740797425e7778544a"
+  },
+  "nodeGroups": [],
+  "id": "bAoEkKHq0QIirxM4",
+  "tags": []
+}
