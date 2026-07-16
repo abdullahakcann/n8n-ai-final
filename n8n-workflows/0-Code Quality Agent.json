@@ -1,0 +1,241 @@
+{
+  "name": "Code Quality Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze the following commit for code quality and readability.\n\nCommit message: {{ $json.body_commit_message }}\nAuthor: {{ $json.body_author }}\nBranch: {{ $json.body_branch }}\n\nDiff:\n{{ $json.body_diff }}\n\nStatic analysis output:\n{{ $json.body_static_analysis }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a senior embedded systems engineer specializing in low-level C code and driver software. Your role is to evaluate code quality and readability of commits made to a driver/firmware codebase.\n\nYou will receive a git diff along with the commit message and static analysis results. Evaluate ONLY the changed code — do not make assumptions about unchanged parts of the codebase.\n\nScoring criteria (0-100):\n- Naming conventions (variables, functions, macros): 25 points\n  * Descriptive names, consistent casing, no single-letter variables outside loop counters\n- Code structure and complexity: 25 points  \n  * Function length (<50 lines preferred), cyclomatic complexity, nesting depth\n  * Single responsibility per function\n- Readability and comments: 20 points\n  * Complex logic explained, public API functions have header comments\n  * No commented-out dead code left behind\n- Commit message alignment: 20 points\n  * Do the changes actually match what the commit message claims?\n  * Is the scope of change appropriate for a single commit?\n- Is the changed code have clear syntax errors: 10 points\n\nDeduct points proportionally for each violation found. Do not overkill but be fair. Provide specific line references from the diff when citing issues.\n\nReturn ONLY valid JSON. No markdown, no explanation outside the JSON. Do not add new line or escape characters, ONLY JSON."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -3840,
+        64
+      ],
+      "id": "030921a6-d29c-4bee-872d-74e4c1e97963",
+      "name": "Code Quality Agent",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"score\": {\n      \"type\": \"integer\",\n      \"minimum\": 0,\n      \"maximum\": 100\n    },\n    \"breakdown\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"naming_conventions\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"points\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 25 },\n            \"max\": { \"type\": \"integer\", \"description\": \"Always 25.\" },\n            \"findings\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n          },\n          \"required\": [\"points\", \"max\", \"findings\"]\n        },\n        \"code_structure\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"points\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 25 },\n            \"max\": { \"type\": \"integer\", \"description\": \"Always 25.\" },\n            \"findings\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n          },\n          \"required\": [\"points\", \"max\", \"findings\"]\n        },\n        \"readability_comments\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"points\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 25 },\n            \"max\": { \"type\": \"integer\", \"description\": \"Always 25.\" },\n            \"findings\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n          },\n          \"required\": [\"points\", \"max\", \"findings\"]\n        },\n        \"commit_alignment\": {\n          \"type\": \"object\",\n          \"properties\": {\n            \"points\": { \"type\": \"integer\", \"minimum\": 0, \"maximum\": 25 },\n            \"max\": { \"type\": \"integer\", \"description\": \"Always 25.\" },\n            \"findings\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }\n          },\n          \"required\": [\"points\", \"max\", \"findings\"]\n        }\n      },\n      \"required\": [\n        \"naming_conventions\",\n        \"code_structure\",\n        \"readability_comments\",\n        \"commit_alignment\"\n      ]\n    },\n    \"summary\": { \"type\": \"string\" },\n    \"improvement_suggestions\": {\n      \"type\": \"array\",\n      \"items\": { \"type\": \"string\" }\n    }\n  },\n  \"required\": [\"score\", \"breakdown\", \"summary\", \"improvement_suggestions\"]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -3680,
+        272
+      ],
+      "id": "6ca2b916-0d16-4d1f-9450-ceaffe6b8f96",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"llm_role\": \"quality\",\n  \"output\": {{ $json.output }} \n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3456,
+        64
+      ],
+      "id": "70a09f8a-3143-4073-aac2-2d8939d91600",
+      "name": "Add LLM Role1"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -4048,
+        64
+      ],
+      "id": "ac55dca0-9ec3-4d29-90e0-b08770b20ad4",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('When Executed by Another Workflow').item.json.resumeUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"llm_role\" : {{ JSON.stringify($json.llm_role) }},\n  \"output\" : {{ JSON.stringify($json.output) }}\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -3248,
+        64
+      ],
+      "id": "d7ec6059-eab4-49a3-b743-d9168533269b",
+      "name": "HTTP Request",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "openai/gpt-oss-120b",
+          "mode": "list",
+          "cachedResultName": "openai/gpt-oss-120b"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -3856,
+        288
+      ],
+      "id": "e2937c12-264d-4254-a806-f7205f090dc9",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "3Kk2KY4hIKZ5qYzt",
+          "name": "OpenAI account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "body": {
+            "author": "Yavuz",
+            "commit_message": "add: new functionality added",
+            "commit_hash": "35a5059e7131ec913c090c90debd8cd42eaa2a08",
+            "timestamp": "2026-06-29 15:11:45 +0300",
+            "repo": "githooktest",
+            "branch": "master",
+            "files_changed": [
+              "linked_list.h",
+              "main.c"
+            ],
+            "diff": "diff --git a/linked_list.h b/linked_list.h\nindex 08e8fe1..74dbaaa 100644\n--- a/linked_list.h\n+++ b/linked_list.h\n@@ -4,6 +4,10 @@\n #include <stdio.h>\n #include <stdlib.h>\n \n+\n+OPENAI=\"Ix4fxOojPTlAS5QfbbkFJiLZNmwoyilvpLnqmcCGso7M3tU3ad94WvZ-B9fHN2sQyHkapxmGqblFOPnkLtWXPGSz5K8qaIA\"\n+\n+\n typedef struct node Node;\n typedef struct linked_list LinkedList;\n \ndiff --git a/main.c b/main.c\nindex e69de29..d6614cc 100644\n--- a/main.c\n+++ b/main.c\n@@ -0,0 +1,47 @@\n+#include <stdio.h>\n+#include <stdlib.h> \n+\n+void secret_function(int num, float num2);\n+\n+int global_number = 10; \n+\n+void secret_function(int a, float b) {\n+    if (a > 5)\n+        global_number = 20;\n+\n+    if (a == 0) {\n+        goto error_exit;\n+    }\n+\n+    printf(\"Value: %d\\n\", a);\n+    return;\n+\n+error_exit:\n+    printf(\"An error occurred!\\n\");\n+}\n+\n+int main(void) {\n+    int uninitialized_variable; \n+    \n+    unsigned int ambiguous_number = 4000000000; \n+\n+    int *ptr = (int *)malloc(sizeof(int) * 5); \n+\n+    int x = 0;\n+    if ((x = uninitialized_variable) > 10) {\n+        // ...\n+    }\n+\n+    int signed_val = -5;\n+    unsigned int unsigned_val = 10;\n+    if (signed_val > unsigned_val) {\n+        // ...\n+    }\n+\n+    for (float f = 0.0f; f < 1.0f; f += 0.1f) {\n+    }\n+\n+    secret_function(5, 3.14f);\n+\n+    return 0;\n+}\n\\ No newline at end of file",
+            "static_analysis": "linked_list.h:11:1: error: syntax error: \"mcCGso7M3tU3ad94WvZ-B9fHN2sQyHkapxmGqblFOPnkLtWXPGSz5K8qaIA\" typedef [syntaxError]\ntypedef struct node Node;\n^\nmain.c:37:20: style: Condition 'signed_val>unsigned_val' is always true [knownConditionTrueFalse]\n    if (signed_val > unsigned_val) {\n                   ^\nmain.c:35:23: note: Assignment 'signed_val=-5', assigned value is -5\n    int signed_val = -5;\n                      ^\nmain.c:37:20: note: Condition 'signed_val>unsigned_val' is always true\n    if (signed_val > unsigned_val) {\n                   ^\nmain.c:28:10: style: Variable 'ptr' can be declared as pointer to const [constVariablePointer]\n    int *ptr = (int *)malloc(sizeof(int) * 5);\n         ^\nmain.c:31:14: error: Uninitialized variable: uninitialized_variable [uninitvar]\n    if ((x = uninitialized_variable) > 10) {\n             ^\nmain.c:26:35: style: Variable 'ambiguous_number' is assigned a value that is never used. [unreadVariable]\n    unsigned int ambiguous_number = 4000000000;\n                                  ^\nmain.c:28:14: style: Variable 'ptr' is assigned a value that is never used. [unreadVariable]\n    int *ptr = (int *)malloc(sizeof(int) * 5);\n             ^\nmain.c:31:12: style: Variable 'x' is assigned a value that is never used. [unreadVariable]\n    if ((x = uninitialized_variable) > 10) {\n           ^\nmain.c:28:30: style: Variable 'ptr' is allocated memory that is never used. [unusedAllocatedMemory]\n    int *ptr = (int *)malloc(sizeof(int) * 5);\n                             ^\nnofile:0:0: information: Active checkers: There was critical errors (use --checkers-report=<filename> to see details) [checkersReport]",
+            "misra_required_violations": [
+              "\tmisra-c2012-2.7 (-): 1",
+              "\tmisra-c2012-8.4 (-): 1",
+              "\tmisra-c2012-10.3 (-): 1",
+              "\tmisra-c2012-10.4 (-): 2",
+              "\tmisra-c2012-13.4 (-): 1",
+              "\tmisra-c2012-14.1 (-): 1",
+              "\tmisra-c2012-15.1 (-): 1",
+              "\tmisra-c2012-15.6 (-): 1",
+              "\tmisra-c2012-17.7 (-): 2",
+              "[main.c:8] (style) A function should not contain unused parameters\t (Advisory) [misra-c2012-2.7]",
+              "[main.c:6] (style) A compatible declaration shall be visible when an object or function with external linkage is defined\t (Required) [misra-c2012-8.4]",
+              "[main.c:26] (style) The value of an expression shall not be assigned to an object with a narrower essential type or of a different essential type category\t (Required) [misra-c2012-10.3]",
+              "[main.c:28] (style) Both operands of an operator in which the usual arithmetic conversions are performed shall have the same essential type category\t (Required) [misra-c2012-10.4]",
+              "[main.c:37] (style) Both operands of an operator in which the usual arithmetic conversions are performed shall have the same essential type category\t (Required) [misra-c2012-10.4]",
+              "[main.c:31] (style) The result of an assignment operator should not be used\t (Advisory) [misra-c2012-13.4]",
+              "[main.c:41] (style) A loop counter shall not have essentially floating type\t (Required) [misra-c2012-14.1]",
+              "[main.c:13] (style) The goto statement should not be used\t (Advisory) [misra-c2012-15.1]",
+              "[main.c:9] (style) The body of an iteration-statement or a selection-statement shall be a compound-statement\t (Required) [misra-c2012-15.6]",
+              "[main.c:16] (style) The value returned by a function having non-void return type shall be used\t (Required) [misra-c2012-17.7]",
+              "[main.c:20] (style) The value returned by a function having non-void return type shall be used\t (Required) [misra-c2012-17.7]"
+            ],
+            "misra_advisory_violations": [
+              "\tmisra-c2012-21.3 (-): 1",
+              "\tmisra-c2012-21.6 (-): 1",
+              "[main.c:28] (style) The memory allocation and deallocation functions of <stdlib.h> shall not be used\t (Required) [misra-c2012-21.3]",
+              "[main.c:1] (style) The Standard Library input/output functions shall not be used\t (Required) [misra-c2012-21.6]"
+            ]
+          },
+          "resumeUrl": "http://localhost:5678/webhook-waiting/101?signature=3db67b812ee8fb0279fef98f1620341488aef6939107eedf5a32e079f7ad805a",
+          "body_static_analysis": "linked_list.h:11:1: error: syntax error: \"3BlbkFJiLZNmwoyilvpLnqmcCGso7M3tU3ad94WvZ-B9fHN2sQyHkapxmGqblFOPnkLtWXPGSz5K8qaIA\" typedef [syntaxError]\ntypedef struct node Node;\n^\nmain.c:37:20: style: Condition 'signed_val>unsigned_val' is always true [knownConditionTrueFalse]\n    if (signed_val > unsigned_val) {\n                   ^\nmain.c:35:23: note: Assignment 'signed_val=-5', assigned value is -5\n    int signed_val = -5;\n                      ^\nmain.c:37:20: note: Condition 'signed_val>unsigned_val' is always true\n    if (signed_val > unsigned_val) {\n                   ^\nmain.c:28:10: style: Variable 'ptr' can be declared as pointer to const [constVariablePointer]\n    int *ptr = (int *)malloc(sizeof(int) * 5);\n         ^\nmain.c:31:14: error: Uninitialized variable: uninitialized_variable [uninitvar]\n    if ((x = uninitialized_variable) > 10) {\n             ^\nmain.c:26:35: style: Variable 'ambiguous_number' is assigned a value that is never used. [unreadVariable]\n    unsigned int ambiguous_number = 4000000000;\n                                  ^\nmain.c:28:14: style: Variable 'ptr' is assigned a value that is never used. [unreadVariable]\n    int *ptr = (int *)malloc(sizeof(int) * 5);\n             ^\nmain.c:31:12: style: Variable 'x' is assigned a value that is never used. [unreadVariable]\n    if ((x = uninitialized_variable) > 10) {\n           ^\nmain.c:28:30: style: Variable 'ptr' is allocated memory that is never used. [unusedAllocatedMemory]\n    int *ptr = (int *)malloc(sizeof(int) * 5);\n                             ^\nnofile:0:0: information: Active checkers: There was critical errors (use --checkers-report=<filename> to see details) [checkersReport]",
+          "body_commit_message": "add: new functionality added",
+          "body_author": "Yavuz",
+          "body_branch": "master",
+          "body_diff": "diff --git a/linked_list.h b/linked_list.h\nindex 08e8fe1..74dbaaa 100644\n--- a/linked_list.h\n+++ b/linked_list.h\n@@ -4,6 +4,10 @@\n #include <stdio.h>\n #include <stdlib.h>\n \n+\n+OPENAI=\"lbkFJiLZNmwoyilvpLnqmcCGso7M3tU3ad94WvZ-B9fHN2sQyHkapxmGqblFOPnkLtWXPGSz5K8qaIA\"\n+\n+\n typedef struct node Node;\n typedef struct linked_list LinkedList;\n \ndiff --git a/main.c b/main.c\nindex e69de29..d6614cc 100644\n--- a/main.c\n+++ b/main.c\n@@ -0,0 +1,47 @@\n+#include <stdio.h>\n+#include <stdlib.h> \n+\n+void secret_function(int num, float num2);\n+\n+int global_number = 10; \n+\n+void secret_function(int a, float b) {\n+    if (a > 5)\n+        global_number = 20;\n+\n+    if (a == 0) {\n+        goto error_exit;\n+    }\n+\n+    printf(\"Value: %d\\n\", a);\n+    return;\n+\n+error_exit:\n+    printf(\"An error occurred!\\n\");\n+}\n+\n+int main(void) {\n+    int uninitialized_variable; \n+    \n+    unsigned int ambiguous_number = 4000000000; \n+\n+    int *ptr = (int *)malloc(sizeof(int) * 5); \n+\n+    int x = 0;\n+    if ((x = uninitialized_variable) > 10) {\n+        // ...\n+    }\n+\n+    int signed_val = -5;\n+    unsigned int unsigned_val = 10;\n+    if (signed_val > unsigned_val) {\n+        // ...\n+    }\n+\n+    for (float f = 0.0f; f < 1.0f; f += 0.1f) {\n+    }\n+\n+    secret_function(5, 3.14f);\n+\n+    return 0;\n+}\n\\ No newline at end of file"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Code Quality Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Quality Agent": {
+      "main": [
+        [
+          {
+            "node": "Add LLM Role1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Code Quality Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add LLM Role1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Code Quality Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1218dc88-140b-4391-87d7-2ca2a49408b1",
+  "meta": {
+    "instanceId": "3cc9a2ffbde4c15dca28560a81b0d5000b779492638426740797425e7778544a"
+  },
+  "nodeGroups": [],
+  "id": "0bEZRp4DvUIlobC8",
+  "tags": []
+}
